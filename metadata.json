@@ -1,0 +1,7 @@
+{
+  "name": "Funil CNAE Inteligente - Classificação e Consulta para Pequenas Empresas",
+  "description": "Sistema completo de funil de enquadramento, busca de CNAEs para MEI e Simples Nacional, simulador de Fator R e chatbot especialista fiscal com API Groq.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

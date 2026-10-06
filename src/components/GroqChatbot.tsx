@@ -28,14 +28,14 @@ export const GroqChatbot: React.FC<GroqChatbotProps> = ({
       role: 'assistant',
       content: `Olá! Sou o **Assistente Fiscal e Tributário com Groq API** especializado em enquadramento de pequenas empresas no Brasil.\n\nPosso te ajudar com:\n- Escolha dos **códigos CNAE** ideais para seu modelo de negócio;\n- Validação de permissão ou vedação para o **MEI (Microempreendedor Individual)**;\n- Planejamento do **Fator R** para economizar impostos no Simples Nacional (pagando 6% em vez de 15,5%);\n- Regras de **Inscrição Estadual (SEFAZ)** e **Inscrição Municipal (Prefeitura)**.\n\nComo posso ajudar você hoje?`,
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      modelUsed: 'llama-3.3-70b-versatile',
+      modelUsed: 'llama-3.1-8b-instant',
       provider: 'groq'
     }
   ]);
 
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [activeModel, setActiveModel] = useState<string>('llama-3.3-70b-versatile');
+  const [activeModel, setActiveModel] = useState<string>('llama-3.1-8b-instant');
   const [activeProvider, setActiveProvider] = useState<'groq' | 'gemini' | 'local_expert'>('groq');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 

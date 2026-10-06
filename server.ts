@@ -50,71 +50,130 @@ app.post('/api/groq/chat', async (req, res) => {
     const groqKey = process.env.GROQ_API_KEY?.trim();
     const geminiKey = process.env.GEMINI_API_KEY?.trim();
 
-    // 1. Prioridade: Groq API (Llama 3.3 70B Versatile)
+    // 1. Prioridade: Groq API com descoberta dinâmica de modelos suportados
     if (groqKey) {
-      try {
-        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${groqKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [
-              { role: 'system', content: SYSTEM_INSTRUCTION_CNAE },
-              ...chatHistory.map((m: any) => ({
-                role: m.role === 'assistant' ? 'assistant' : 'user',
-                content: m.content
-              }))
-            ],
-            temperature: 0.3,
-            max_tokens: 1500
-          })
-        });
+      // Lista de preferência de qualidade
+      const preferredRanking = [
+        'openai/gpt-oss-120b',
+        'llama-3.3-70b-versatile',
+        'llama-3.1-70b-versatile',
+        'qwen/qwen3.8-27b',
+        'openai/gpt-oss-20b',
+        'llama-3.1-8b-instant',
+        'llama3-70b-8192',
+        'llama3-8b-8192',
+        'mixtral-8x7b-32768',
+        'gemma2-9b-it',
+        'allam-2-7b'
+      ];
 
-        if (groqResponse.ok) {
-          const data = await groqResponse.json();
-          const assistantReply = data.choices?.[0]?.message?.content;
-          if (assistantReply) {
-            return res.json({
-              reply: assistantReply,
-              provider: 'groq',
-              model: 'llama-3.3-70b-versatile'
-            });
+      let modelsToTry: string[] = [];
+
+      try {
+        const listRes = await fetch('https://api.groq.com/openai/v1/models', {
+          headers: { 'Authorization': `Bearer ${groqKey}` }
+        });
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          if (Array.isArray(listData.data)) {
+            const availableIds: string[] = listData.data
+              .map((m: any) => m.id)
+              .filter((id: string) => 
+                !id.includes('whisper') && 
+                !id.includes('guard') && 
+                !id.includes('safeguard')
+              );
+
+            // Ordena os modelos disponíveis conforme a ordem de preferência
+            const rankedAvailable = preferredRanking.filter(p => availableIds.includes(p));
+            const remainingAvailable = availableIds.filter(id => !preferredRanking.includes(id));
+            modelsToTry = [...rankedAvailable, ...remainingAvailable];
           }
-        } else {
-          const errorText = await groqResponse.text();
-          console.warn('Groq API error:', errorText);
         }
       } catch (err) {
-        console.warn('Falha na requisição Groq, testando contingência:', err);
+        console.warn('Erro ao consultar modelos da Groq:', err);
+      }
+
+      if (modelsToTry.length === 0) {
+        modelsToTry = preferredRanking;
+      }
+
+      for (const modelName of modelsToTry) {
+        try {
+          const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${groqKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: modelName,
+              messages: [
+                { role: 'system', content: SYSTEM_INSTRUCTION_CNAE },
+                ...chatHistory.map((m: any) => ({
+                  role: m.role === 'assistant' ? 'assistant' : 'user',
+                  content: m.content
+                }))
+              ],
+              temperature: 0.3,
+              max_tokens: 1500
+            })
+          });
+
+          if (groqResponse.ok) {
+            const data = await groqResponse.json();
+            const assistantReply = data.choices?.[0]?.message?.content;
+            if (assistantReply) {
+              return res.json({
+                reply: assistantReply,
+                provider: 'groq',
+                model: modelName
+              });
+            }
+          } else {
+            const errorText = await groqResponse.text();
+            console.warn(`Groq API error no modelo ${modelName}:`, errorText);
+            if (errorText.includes('model_not_found') || errorText.includes('does not exist') || errorText.includes('access')) {
+              continue;
+            }
+          }
+        } catch (err) {
+          console.warn(`Falha na chamada Groq com modelo ${modelName}:`, err);
+        }
       }
     }
 
-    // 2. Contingência: Gemini API (se configurado)
+    // 2. Contingência: Gemini API (tentando gemini-3.8-flash e gemini-3.1-flash-lite)
     if (geminiKey) {
-      try {
-        const ai = new GoogleGenAI({ apiKey: geminiKey });
-        const lastUserMsg = chatHistory[chatHistory.length - 1]?.content || userQuestion;
-        
-        // Contextual prompt with system instruction
-        const promptContent = `${SYSTEM_INSTRUCTION_CNAE}\n\nHistórico recente da conversa:\n${chatHistory.map((m: any) => `${m.role === 'user' ? 'Usuário' : 'Consultor'}: ${m.content}`).join('\n')}\n\nResponda ao usuário com foco no enquadramento de pequenas empresas no Brasil:`;
-
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: promptContent
-        });
-
-        if (response && response.text) {
-          return res.json({
-            reply: response.text,
-            provider: 'gemini',
-            model: 'gemini-2.5-flash'
+      const geminiCandidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+      for (const gemModel of geminiCandidateModels) {
+        try {
+          const ai = new GoogleGenAI({ 
+            apiKey: geminiKey,
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build'
+              }
+            }
           });
+          
+          const promptContent = `${SYSTEM_INSTRUCTION_CNAE}\n\nHistórico recente da conversa:\n${chatHistory.map((m: any) => `${m.role === 'user' ? 'Usuário' : 'Consultor'}: ${m.content}`).join('\n')}\n\nResponda ao usuário com foco no enquadramento de pequenas empresas no Brasil:`;
+
+          const response = await ai.models.generateContent({
+            model: gemModel,
+            contents: promptContent
+          });
+
+          if (response && response.text) {
+            return res.json({
+              reply: response.text,
+              provider: 'gemini',
+              model: gemModel
+            });
+          }
+        } catch (err) {
+          console.warn(`Falha na contingência Gemini com ${gemModel}:`, err);
         }
-      } catch (err) {
-        console.warn('Falha na contingência Gemini:', err);
       }
     }
 
@@ -206,4 +265,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('[Funil CNAE] Erro fatal ao iniciar servidor:', err);
+});
+
